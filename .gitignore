@@ -62,3 +62,8 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+# ML training artifacts
+data/processed/ML/checkpoints/
+# ML baseline and evaluation outputs
+data/processed/ML/baselines/
+data/processed/ML/evaluation/

@@ -1,0 +1,100 @@
+{
+  "project": "OceanEmbed",
+  "experiment": "OceanEmbed-CNN",
+  "experiment_variant": "E2_7day_retrospective",
+  "checkpoint_version": "V1",
+  "prediction_date": "2025-12-01",
+  "input_window": {
+    "start": "2025-11-25",
+    "end": "2025-12-01",
+    "days": 7
+  },
+  "input_features": [
+    "sst",
+    "sss",
+    "sla",
+    "uo",
+    "vo",
+    "u_wind",
+    "v_wind"
+  ],
+  "input_shape": [
+    49,
+    64,
+    64
+  ],
+  "output_shape": [
+    15,
+    32,
+    32
+  ],
+  "depths_m": [
+    0,
+    5,
+    10,
+    20,
+    30,
+    50,
+    75,
+    100,
+    125,
+    150,
+    200,
+    300,
+    500,
+    700,
+    1000
+  ],
+  "temperature_units": "degC",
+  "ensemble": {
+    "type": "three_seed_mean",
+    "seeds": [
+      42,
+      123,
+      2024
+    ],
+    "size": 3
+  },
+  "spatial": {
+    "resolution_degrees": 0.25,
+    "tile_row": 0,
+    "tile_col": 0,
+    "input_size": [
+      64,
+      64
+    ],
+    "output_size": [
+      32,
+      32
+    ],
+    "target_context_pixels": 16,
+    "output_latitude_min": 9.0,
+    "output_latitude_max": 16.75,
+    "output_longitude_min": 49.0,
+    "output_longitude_max": 56.75
+  },
+  "normalization": {
+    "statistics_file": "data/processed/ML/ml_config.json",
+    "source": "ml_config.json",
+    "training_period": {
+      "start": "2025-07-01",
+      "end": "2025-10-31"
+    },
+    "validation_period": {
+      "start": "2025-11-01",
+      "end": "2025-11-30"
+    },
+    "test_period": {
+      "start": "2025-12-01",
+      "end": "2025-12-31"
+    },
+    "note": "V1 checkpoints use the original train-only normalization stored in ml_config.json. final_training_statistics.json is not used by the current V1 checkpoints."
+  },
+  "output_files": {
+    "netcdf": "oceanembed_prediction_2025-12-01_tile_r0_c0.nc"
+  },
+  "prediction_range_degC": {
+    "min": 6.855418682098389,
+    "max": 28.691099166870117
+  }
+}

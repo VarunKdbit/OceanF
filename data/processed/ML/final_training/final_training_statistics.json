@@ -1,0 +1,159 @@
+{
+  "project": "OceanF",
+  "experiment": "OceanEmbed-CNN",
+  "statistics_type": "final_training_normalization",
+  "training_period": {
+    "start": "2025-07-01",
+    "end": "2025-11-30"
+  },
+  "input_features": [
+    "sst",
+    "sss",
+    "sla",
+    "uo",
+    "vo",
+    "u_wind",
+    "v_wind"
+  ],
+  "target_variable": "thetao",
+  "target_depths_m": [
+    0.0,
+    5.0,
+    10.0,
+    20.0,
+    30.0,
+    50.0,
+    75.0,
+    100.0,
+    125.0,
+    150.0,
+    200.0,
+    300.0,
+    500.0,
+    700.0,
+    1000.0
+  ],
+  "statistics_definition": {
+    "mean": "arithmetic_mean_of_finite_values",
+    "std": "population_standard_deviation_ddof_0",
+    "valid_count": "number_of_finite_values"
+  },
+  "source": {
+    "type": "persistent_harmonized_netcdf",
+    "directory": "C:\\OceanEmbed\\OceanF\\data\\processed\\ML\\harmonized"
+  },
+  "input_statistics": {
+    "sst": {
+      "mean": 28.38301099122547,
+      "std": 1.6165064608834696,
+      "valid_count": 1794078
+    },
+    "sss": {
+      "mean": 34.61608928704716,
+      "std": 2.2398221042065027,
+      "valid_count": 1738080
+    },
+    "sla": {
+      "mean": 0.12891678448330096,
+      "std": 0.11045101112999905,
+      "valid_count": 1805859
+    },
+    "uo": {
+      "mean": 0.1105063878830377,
+      "std": 0.3024822054787287,
+      "valid_count": 1724553
+    },
+    "vo": {
+      "mean": 0.0039013185506899433,
+      "std": 0.25949929691913554,
+      "valid_count": 1724473
+    },
+    "u_wind": {
+      "mean": 1.8369779772539863,
+      "std": 3.6442864184714296,
+      "valid_count": 3724173
+    },
+    "v_wind": {
+      "mean": 1.0376878836424912,
+      "std": 3.3817903044786046,
+      "valid_count": 3724173
+    }
+  },
+  "target_statistics": {
+    "0.0": {
+      "mean": 28.462158931368116,
+      "std": 1.5377709729956854,
+      "valid_count": 1770822
+    },
+    "5.0": {
+      "mean": 28.418809832261733,
+      "std": 1.5334872544637612,
+      "valid_count": 1770822
+    },
+    "10.0": {
+      "mean": 28.361232441642514,
+      "std": 1.5161630594799518,
+      "valid_count": 1718037
+    },
+    "20.0": {
+      "mean": 28.23797362813256,
+      "std": 1.5755075073778884,
+      "valid_count": 1677339
+    },
+    "30.0": {
+      "mean": 28.00982441482152,
+      "std": 1.753599033921832,
+      "valid_count": 1629603
+    },
+    "50.0": {
+      "mean": 27.274561243095313,
+      "std": 2.2841543979434245,
+      "valid_count": 1552185
+    },
+    "75.0": {
+      "mean": 25.90190990616079,
+      "std": 2.6420676949770603,
+      "valid_count": 1497411
+    },
+    "100.0": {
+      "mean": 23.784934468320614,
+      "std": 2.5184755965294245,
+      "valid_count": 1465587
+    },
+    "125.0": {
+      "mean": 21.163546400608226,
+      "std": 2.253220726518992,
+      "valid_count": 1459467
+    },
+    "150.0": {
+      "mean": 18.79647306119682,
+      "std": 2.121839848306653,
+      "valid_count": 1449675
+    },
+    "200.0": {
+      "mean": 15.814573819476662,
+      "std": 1.8686357885138176,
+      "valid_count": 1434681
+    },
+    "300.0": {
+      "mean": 13.075200060002746,
+      "std": 1.3724125306020343,
+      "valid_count": 1422594
+    },
+    "500.0": {
+      "mean": 11.20528114465993,
+      "std": 1.14001150842692,
+      "valid_count": 1396278
+    },
+    "700.0": {
+      "mean": 9.754431995123188,
+      "std": 1.1843364229050073,
+      "valid_count": 1373787
+    },
+    "1000.0": {
+      "mean": 7.694785944490315,
+      "std": 1.0503088549535722,
+      "valid_count": 1334160
+    }
+  }
+}

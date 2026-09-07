@@ -1,0 +1,234 @@
+{
+  "project": "OceanF",
+  "experiment": "OceanEmbed-CNN",
+  "experiment_variant": "E2_7day_retrospective_final_training",
+  "purpose": "Final training configuration using 2025-07-01 through 2025-11-30",
+  "domain": {
+    "latitude_min": 5.0,
+    "latitude_max": 30.0,
+    "longitude_min": 45.0,
+    "longitude_max": 105.0,
+    "resolution": 0.25
+  },
+  "time": {
+    "train_start": "2025-07-01",
+    "train_end": "2025-11-30",
+    "validation_start": null,
+    "validation_end": null,
+    "test_start": "2025-12-01",
+    "test_end": "2025-12-31",
+    "final_training_start": "2025-07-01",
+    "final_training_end": "2025-11-30",
+    "final_test_start": "2025-12-01",
+    "final_test_end": "2025-12-31"
+  },
+  "input_features": [
+    "sst",
+    "sss",
+    "sla",
+    "uo",
+    "vo",
+    "u_wind",
+    "v_wind"
+  ],
+  "target_variable": "thetao",
+  "target_depths_m": [
+    0,
+    5,
+    10,
+    20,
+    30,
+    50,
+    75,
+    100,
+    125,
+    150,
+    200,
+    300,
+    500,
+    700,
+    1000
+  ],
+  "model": {
+    "architecture": "OceanEmbed-CNN",
+    "history_days": 7,
+    "input_channels": 49,
+    "latent_channels": 128,
+    "output_channels": 15,
+    "input_tile_size": 64,
+    "output_tile_size": 32,
+    "context_pixels": 16,
+    "tile_stride": 32
+  },
+  "loss": {
+    "name": "masked_huber",
+    "delta": 1.0
+  },
+  "optimizer": {
+    "name": "Adam",
+    "learning_rate": 0.001
+  },
+  "training": {
+    "batch_size": 4,
+    "epochs": 20,
+    "gradient_clip": 1.0,
+    "num_workers": 0,
+    "early_stopping": false
+  },
+  "normalization": {
+    "inputs": "final_training_period_mean_std",
+    "target": "final_training_period_mean_std_by_depth",
+    "statistics_file": "data\\processed\\ML\\final_training\\final_training_statistics.json"
+  },
+  "missing_data": {
+    "input_missing_values": "filled_with_zero_after_normalization",
+    "input_validity_mask": "retained",
+    "target_missing_values": "retained",
+    "target_validity_mask": "retained",
+    "target_loss": "masked"
+  },
+  "spatial_harmonization": {
+    "method": "linear_interpolation",
+    "target_resolution": 0.25
+  },
+  "split_strategy": {
+    "type": "chronological",
+    "validation": "none",
+    "final_test_is_held_out": true
+  },
+  "ensemble": {
+    "enabled": true,
+    "type": "three_seed_arithmetic_mean",
+    "seeds": [
+      42,
+      123,
+      2024
+    ],
+    "size": 3
+  },
+  "input_statistics": {
+    "sst": {
+      "mean": 28.38301099122547,
+      "std": 1.6165064608834696,
+      "valid_count": 1794078
+    },
+    "sss": {
+      "mean": 34.61608928704716,
+      "std": 2.2398221042065027,
+      "valid_count": 1738080
+    },
+    "sla": {
+      "mean": 0.12891678448330096,
+      "std": 0.11045101112999905,
+      "valid_count": 1805859
+    },
+    "uo": {
+      "mean": 0.1105063878830377,
+      "std": 0.3024822054787287,
+      "valid_count": 1724553
+    },
+    "vo": {
+      "mean": 0.0039013185506899433,
+      "std": 0.25949929691913554,
+      "valid_count": 1724473
+    },
+    "u_wind": {
+      "mean": 1.8369779772539863,
+      "std": 3.6442864184714296,
+      "valid_count": 3724173
+    },
+    "v_wind": {
+      "mean": 1.0376878836424912,
+      "std": 3.3817903044786046,
+      "valid_count": 3724173
+    }
+  },
+  "target_statistics": {
+    "0.0": {
+      "mean": 28.462158931368116,
+      "std": 1.5377709729956854,
+      "valid_count": 1770822
+    },
+    "5.0": {
+      "mean": 28.418809832261733,
+      "std": 1.5334872544637612,
+      "valid_count": 1770822
+    },
+    "10.0": {
+      "mean": 28.361232441642514,
+      "std": 1.5161630594799518,
+      "valid_count": 1718037
+    },
+    "20.0": {
+      "mean": 28.23797362813256,
+      "std": 1.5755075073778884,
+      "valid_count": 1677339
+    },
+    "30.0": {
+      "mean": 28.00982441482152,
+      "std": 1.753599033921832,
+      "valid_count": 1629603
+    },
+    "50.0": {
+      "mean": 27.274561243095313,
+      "std": 2.2841543979434245,
+      "valid_count": 1552185
+    },
+    "75.0": {
+      "mean": 25.90190990616079,
+      "std": 2.6420676949770603,
+      "valid_count": 1497411
+    },
+    "100.0": {
+      "mean": 23.784934468320614,
+      "std": 2.5184755965294245,
+      "valid_count": 1465587
+    },
+    "125.0": {
+      "mean": 21.163546400608226,
+      "std": 2.253220726518992,
+      "valid_count": 1459467
+    },
+    "150.0": {
+      "mean": 18.79647306119682,
+      "std": 2.121839848306653,
+      "valid_count": 1449675
+    },
+    "200.0": {
+      "mean": 15.814573819476662,
+      "std": 1.8686357885138176,
+      "valid_count": 1434681
+    },
+    "300.0": {
+      "mean": 13.075200060002746,
+      "std": 1.3724125306020343,
+      "valid_count": 1422594
+    },
+    "500.0": {
+      "mean": 11.20528114465993,
+      "std": 1.14001150842692,
+      "valid_count": 1396278
+    },
+    "700.0": {
+      "mean": 9.754431995123188,
+      "std": 1.1843364229050073,
+      "valid_count": 1373787
+    },
+    "1000.0": {
+      "mean": 7.694785944490315,
+      "std": 1.0503088549535722,
+      "valid_count": 1334160
+    }
+  },
+  "source_statistics": {
+    "file": "data\\processed\\ML\\final_training\\final_training_statistics.json",
+    "training_start": "2025-07-01",
+    "training_end": "2025-11-30",
+    "statistics_are_training_only": true
+  },
+  "data_policy": {
+    "final_test_data_is_not_used_for_training": true,
+    "final_test_data_is_not_used_for_normalization": true,
+    "final_test_data_is_not_used_for_model_selection": true
+  }
+}
