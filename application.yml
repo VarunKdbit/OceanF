@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: backend-api
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:oceanembed}
+    username: ${DB_USER:oceanembed}
+    password: ${DB_PASSWORD:oceanembed}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+ml-service:
+  base-url: ${ML_SERVICE_URL:http://localhost:8000}
+  connect-timeout-ms: 3000
+  read-timeout-ms: 10000
+
+logging:
+  level:
+    com.oceanembed.backend: INFO
