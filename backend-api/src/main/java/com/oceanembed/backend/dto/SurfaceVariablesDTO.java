@@ -1,23 +1,15 @@
-package com.oceanembed.backend.dto;
-
-import jakarta.validation.constraints.NotNull;
+﻿package com.oceanembed.backend.dto;
 
 /**
- * Satellite-observed surface inputs required by the OceanEmbed model:
- * SST (Sea Surface Temperature), SSS (Sea Surface Salinity),
- * SSH/SLA (Sea Surface Height / Sea Level Anomaly), and surface wind.
+ * Optional frontend metadata only. These values are never treated as the
+ * complete OceanEmbed model input.
  */
 public class SurfaceVariablesDTO {
-
-    @NotNull
     private Double sst;
-
-    @NotNull
     private Double sss;
-
-    @NotNull
-    private Double ssh;
-
+    private Double sla;
+    private Double uo;
+    private Double vo;
     private Double windU;
     private Double windV;
 
@@ -25,8 +17,12 @@ public class SurfaceVariablesDTO {
     public void setSst(Double sst) { this.sst = sst; }
     public Double getSss() { return sss; }
     public void setSss(Double sss) { this.sss = sss; }
-    public Double getSsh() { return ssh; }
-    public void setSsh(Double ssh) { this.ssh = ssh; }
+    public Double getSla() { return sla; }
+    public void setSla(Double sla) { this.sla = sla; }
+    public Double getUo() { return uo; }
+    public void setUo(Double uo) { this.uo = uo; }
+    public Double getVo() { return vo; }
+    public void setVo(Double vo) { this.vo = vo; }
     public Double getWindU() { return windU; }
     public void setWindU(Double windU) { this.windU = windU; }
     public Double getWindV() { return windV; }

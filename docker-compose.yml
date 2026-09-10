@@ -1,6 +1,4 @@
-version: "3.9"
-
-services:
+﻿services:
   postgres:
     image: postgres:16-alpine
     environment:
@@ -13,11 +11,15 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   ml-service:
-    build: ./ml-service
+    build:
+      context: .
+      dockerfile: ml-services/Dockerfile
     ports:
       - "8000:8000"
     environment:
       OCEANEMBED_MODEL_VERSION: oceanembed-v1.0
+    volumes:
+      - ./data/processed/ML:/workspace/data/processed/ML:ro
 
   backend-api:
     build: ./backend-api
@@ -29,7 +31,7 @@ services:
       DB_NAME: oceanembed
       DB_USER: oceanembed
       DB_PASSWORD: oceanembed
-      ML_SERVICE_URL: http://ml-service:8000
+      ML_SERVICE_BASE_URL: http://ml-service:8000
     depends_on:
       - postgres
       - ml-service

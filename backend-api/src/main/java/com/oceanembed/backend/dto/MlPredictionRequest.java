@@ -1,9 +1,12 @@
-package com.oceanembed.backend.dto;
+﻿package com.oceanembed.backend.dto;
 
 import java.time.LocalDate;
 import java.util.List;
 
-/** Mirrors ml-service/app/schemas.py:PredictionRequest exactly (field names must match). */
+/**
+ * Final Spring -> FastAPI contract.
+ * The ML service obtains the real 7-day x 7-variable spatial window itself.
+ */
 public class MlPredictionRequest {
     private Double latitude;
     private Double longitude;

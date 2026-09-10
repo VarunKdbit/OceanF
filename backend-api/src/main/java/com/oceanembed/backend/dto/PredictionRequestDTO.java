@@ -1,14 +1,16 @@
-package com.oceanembed.backend.dto;
+﻿package com.oceanembed.backend.dto;
 
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
-/**
- * Contract the frontend (React) sends to Spring Boot's /api/v1/predictions endpoint.
- */
 public class PredictionRequestDTO {
+
+    private static final Set<Integer> SUPPORTED_DEPTHS = Set.of(
+        0, 5, 10, 20, 30, 50, 75, 100,
+        125, 150, 200, 300, 500, 700, 1000
+    );
 
     @NotNull
     @DecimalMin(value = "-90.0")
@@ -23,15 +25,19 @@ public class PredictionRequestDTO {
     @NotNull
     private LocalDate date;
 
-    /** Optional human-readable region label, e.g. "Arabian Sea" */
     private String regionName;
 
-    @NotNull
-    @Valid
+    /**
+     * Optional legacy surface metadata accepted from older frontend clients.
+     * It is NOT used as the OceanEmbed model input.
+     */
     private SurfaceVariablesDTO surface;
 
-    /** Requested depth levels in meters. Defaults applied server-side if omitted. */
-    private List<@Min(0) @Max(2000) Integer> depths;
+    private List<Integer> depths;
+
+    public boolean hasSupportedDepths() {
+        return depths == null || depths.stream().allMatch(SUPPORTED_DEPTHS::contains);
+    }
 
     public Double getLatitude() { return latitude; }
     public void setLatitude(Double latitude) { this.latitude = latitude; }

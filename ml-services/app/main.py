@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 from fastapi import FastAPI, HTTPException
 
@@ -11,8 +11,7 @@ logger = logging.getLogger("oceanembed.api")
 
 app = FastAPI(
     title="OceanEmbed ML Service",
-    description="Serves subsurface ocean temperature predictions from the OceanEmbed model. "
-                 "Called internally by the Spring Boot backend-api service.",
+    description="Real OceanEmbed V1 E2 inference service.",
     version=settings.model_version,
 )
 
@@ -33,26 +32,28 @@ def health() -> HealthResponse:
 
 @app.get("/model/info", tags=["ops"])
 def model_info() -> dict:
-    return {
-        "model_version": model.model_version,
-        "grid_resolution_deg": settings.grid_resolution_deg,
-        "available_depth_levels_m": settings.depth_levels,
-        "input_variables": ["sst", "sss", "ssh_sla", "wind_u", "wind_v"],
-        "training_reference_data": "GLORYS reanalysis",
-        "validation_reference_data": "ARGO float profiles (held out from training)",
-    }
+    return model.get_model_info()
 
 
 @app.post("/predict", response_model=PredictionResponse, tags=["inference"])
 def predict(request: PredictionRequest) -> PredictionResponse:
     if not model.loaded:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(
+            status_code=503,
+            detail="Real OceanEmbed model/data are not loaded",
+        )
 
     try:
         predictions = model.predict(request)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.warning("Invalid/unavailable OceanEmbed request: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Inference failed")
-        raise HTTPException(status_code=500, detail=f"Inference error: {exc}")
+        logger.exception("OceanEmbed inference failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"OceanEmbed inference error: {exc}",
+        ) from exc
 
     return PredictionResponse(
         latitude=request.latitude,

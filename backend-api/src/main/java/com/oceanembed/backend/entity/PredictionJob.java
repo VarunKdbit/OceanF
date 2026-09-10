@@ -1,4 +1,4 @@
-package com.oceanembed.backend.entity;
+﻿package com.oceanembed.backend.entity;
 
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -18,7 +18,7 @@ public class PredictionJob {
     private Double longitude;
     private LocalDate requestDate;
 
-    // Surface variables snapshot, stored for traceability/reproducibility
+    // Optional request metadata only; these are NOT the ML tensor.
     private Double sst;
     private Double sss;
     private Double ssh;
@@ -32,8 +32,14 @@ public class PredictionJob {
     private JobStatus status;
 
     private String modelVersion;
-    private String errorMessage;
 
+    @Column(name = "input_window_start")
+    private LocalDate inputWindowStart;
+
+    @Column(name = "input_window_end")
+    private LocalDate inputWindowEnd;
+
+    private String errorMessage;
     private Instant createdAt;
     private Instant completedAt;
 
@@ -74,6 +80,10 @@ public class PredictionJob {
     public void setStatus(JobStatus status) { this.status = status; }
     public String getModelVersion() { return modelVersion; }
     public void setModelVersion(String modelVersion) { this.modelVersion = modelVersion; }
+    public LocalDate getInputWindowStart() { return inputWindowStart; }
+    public void setInputWindowStart(LocalDate inputWindowStart) { this.inputWindowStart = inputWindowStart; }
+    public LocalDate getInputWindowEnd() { return inputWindowEnd; }
+    public void setInputWindowEnd(LocalDate inputWindowEnd) { this.inputWindowEnd = inputWindowEnd; }
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public Instant getCreatedAt() { return createdAt; }
