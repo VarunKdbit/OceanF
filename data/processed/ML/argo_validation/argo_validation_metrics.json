@@ -1,0 +1,200 @@
+{
+  "validation_period": {
+    "start": "2025-12-01",
+    "end": "2025-12-31"
+  },
+  "split": "test",
+  "domain": {
+    "latitude_min": 5.0,
+    "latitude_max": 30.0,
+    "longitude_min": 45.0,
+    "longitude_max": 105.0
+  },
+  "grid_resolution_deg": 0.25,
+  "spatial_threshold": {
+    "maximum_degrees": 0.5,
+    "maximum_approx_km": 55.5975,
+    "distance_method": "great-circle haversine distance to nearest OceanEmbed grid point"
+  },
+  "temporal_matching_rule": "same calendar day; no tolerance window",
+  "depths_m": [
+    0,
+    5,
+    10,
+    20,
+    30,
+    50,
+    75,
+    100,
+    125,
+    150,
+    200,
+    300,
+    500,
+    700,
+    1000
+  ],
+  "profile_count_considered": 352,
+  "profile_count_used": 76,
+  "total_valid_matchups": 997,
+  "per_depth_metrics": [
+    {
+      "depth_m": 0,
+      "valid_observations": 1,
+      "rmse_c": 0.4647846221923828,
+      "mae_c": 0.4647846221923828,
+      "bias_c": 0.4647846221923828,
+      "pearson_correlation": null
+    },
+    {
+      "depth_m": 5,
+      "valid_observations": 69,
+      "rmse_c": 0.9842119289568078,
+      "mae_c": 0.7955126710489463,
+      "bias_c": 0.20872109817468384,
+      "pearson_correlation": 0.19168952254652938
+    },
+    {
+      "depth_m": 10,
+      "valid_observations": 69,
+      "rmse_c": 0.9801120511516408,
+      "mae_c": 0.7936582921128272,
+      "bias_c": 0.2107079576872779,
+      "pearson_correlation": 0.19470033823758776
+    },
+    {
+      "depth_m": 20,
+      "valid_observations": 69,
+      "rmse_c": 0.9998120734949427,
+      "mae_c": 0.8137723405527594,
+      "bias_c": 0.0884109234634662,
+      "pearson_correlation": 0.21090583889660158
+    },
+    {
+      "depth_m": 30,
+      "valid_observations": 75,
+      "rmse_c": 1.2083108899173387,
+      "mae_c": 0.9770840676494223,
+      "bias_c": 0.23847045322017474,
+      "pearson_correlation": 0.030875249789422726
+    },
+    {
+      "depth_m": 50,
+      "valid_observations": 75,
+      "rmse_c": 1.9484436592831615,
+      "mae_c": 1.4166561934038635,
+      "bias_c": 0.12376860063278201,
+      "pearson_correlation": -0.0407355935333421
+    },
+    {
+      "depth_m": 75,
+      "valid_observations": 75,
+      "rmse_c": 2.457003214131987,
+      "mae_c": 1.8342150094359537,
+      "bias_c": 0.07992069857299976,
+      "pearson_correlation": 0.07688229821917072
+    },
+    {
+      "depth_m": 100,
+      "valid_observations": 75,
+      "rmse_c": 2.0314378607140307,
+      "mae_c": 1.3982189861370584,
+      "bias_c": -0.17197178080294676,
+      "pearson_correlation": 0.1758242654061276
+    },
+    {
+      "depth_m": 125,
+      "valid_observations": 75,
+      "rmse_c": 1.753599796458777,
+      "mae_c": 1.3330531177647988,
+      "bias_c": -0.5052728843122086,
+      "pearson_correlation": 0.1522077422336125
+    },
+    {
+      "depth_m": 150,
+      "valid_observations": 75,
+      "rmse_c": 1.4724543137551767,
+      "mae_c": 1.28647986183028,
+      "bias_c": -0.7367179038288301,
+      "pearson_correlation": 0.1167055180232493
+    },
+    {
+      "depth_m": 200,
+      "valid_observations": 71,
+      "rmse_c": 1.426430751998152,
+      "mae_c": 1.1164532239492415,
+      "bias_c": -0.6718977106741326,
+      "pearson_correlation": -0.09423783051616247
+    },
+    {
+      "depth_m": 300,
+      "valid_observations": 67,
+      "rmse_c": 1.4097818503694528,
+      "mae_c": 1.1426612073043168,
+      "bias_c": -0.36526016108039855,
+      "pearson_correlation": -0.10269716988583547
+    },
+    {
+      "depth_m": 500,
+      "valid_observations": 67,
+      "rmse_c": 1.299429827413348,
+      "mae_c": 1.1684814969777058,
+      "bias_c": -0.297378872822955,
+      "pearson_correlation": -0.09933636280527226
+    },
+    {
+      "depth_m": 700,
+      "valid_observations": 67,
+      "rmse_c": 1.3501693292976735,
+      "mae_c": 1.1935304799588835,
+      "bias_c": -0.44543743943509845,
+      "pearson_correlation": -0.21060341842594266
+    },
+    {
+      "depth_m": 1000,
+      "valid_observations": 67,
+      "rmse_c": 1.0763985125864877,
+      "mae_c": 0.9585387342508435,
+      "bias_c": -0.3313251041205465,
+      "pearson_correlation": -0.21632498640399486
+    }
+  ],
+  "overall_metrics": {
+    "depth_m": null,
+    "valid_observations": 997,
+    "rmse_c": 1.5328501153092542,
+    "mae_c": 1.166498789101747,
+    "bias_c": -0.1820703221572935,
+    "pearson_correlation": 0.978705148451818
+  },
+  "data_source": {
+    "name": "Official Argo GDAC profile NetCDF",
+    "profile_index_url": "https://data-argo.ifremer.fr/ar_index_global_prof.txt.gz",
+    "profile_base_url": "https://data-argo.ifremer.fr/dac"
+  },
+  "data_mode": {
+    "rule": "Delayed-mode profiles are processed first when available; only adjusted variables enter metrics.",
+    "counts": {
+      "D": 78,
+      "A": 28,
+      "R": 246,
+      "UNKNOWN": 0
+    }
+  },
+  "qc_rule": "TEMP_ADJUSTED and PRES_ADJUSTED only; corresponding TEMP_ADJUSTED_QC and PRES_ADJUSTED_QC must both equal '1'.",
+  "normalization_and_model": "Existing OceanEmbed V1 three-seed ensemble mean and spread; original train-only statistics from ml_config.json.",
+  "exclusion_counts": {
+    "outside_model_output_coverage": 68,
+    "insufficient_depth_coverage_for_interpolation": 1,
+    "no_adjusted_measurements_with_qc_1": 207
+  },
+  "notes": [
+    "ARGO observations are independent validation data and were not used for training, normalization, model selection, hyperparameter tuning, threshold tuning, or GLORYS targets.",
+    "Only same-calendar-day profile/model matchups are included.",
+    "Adjusted pressure was converted to positive-down geometric depth with TEOS-10 gsw.z_from_p at the profile latitude.",
+    "Vertical interpolation is linear and only performed within the observed valid-depth range; no extrapolation is used.",
+    "Index candidates outside the existing model's centered 32x32 output coverage are explicitly excluded.",
+    "Per-depth metrics use only profiles with a QC-valid adjusted observation that brackets that target depth.",
+    "The primary comparison is OceanEmbed prediction versus ARGO observation; GLORYS is not part of these metrics."
+  ]
+}

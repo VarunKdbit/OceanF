@@ -1,0 +1,470 @@
+OCEANEMBED — SIH 2026
+TEAM SETUP GUIDE
+========================================
+
+Purpose
+-------
+This guide helps a teammate clone the OceanEmbed repository and prepare the
+local environment for the SIH 2026 prototype.
+
+Repository
+----------
+https://github.com/THARUN-D-GIT/OceanF
+
+Project stack
+-------------
+Frontend : React + Vite + TypeScript
+Backend  : Spring Boot
+ML API   : FastAPI + PyTorch
+Data     : NetCDF/xarray + Copernicus Marine ingestion
+Database : PostgreSQL
+
+IMPORTANT
+---------
+The repository now contains:
+- Source code
+- Python dependency manifests
+- Frontend package files
+- Spring Boot Maven configuration
+- ml_config.json
+- Three trained OceanEmbed V1 checkpoints
+
+Large raw/live/harmonized datasets are NOT stored in Git.
+Live data may need to be obtained through the Copernicus ingestion pipeline.
+
+==================================================
+1. PREREQUISITES
+==================================================
+
+Install the following before starting:
+
+1. Git
+2. Python 3.x
+3. Node.js + npm
+4. JDK 17
+5. Maven
+6. PostgreSQL
+
+For GPU inference/training:
+- NVIDIA GPU + compatible PyTorch/CUDA environment is optional.
+- CPU inference is supported by the model code when CUDA is unavailable.
+
+==================================================
+2. CLONE THE REPOSITORY
+==================================================
+
+Open PowerShell/Terminal:
+
+git clone https://github.com/THARUN-D-GIT/OceanF.git
+cd OceanF
+
+Verify the repository:
+
+git status
+
+The repository should contain:
+
+data/
+backend-api/
+frontend/
+ml-services/
+scripts/
+
+==================================================
+3. PYTHON ML ENVIRONMENT
+==================================================
+
+Create a project-local Python environment.
+
+Windows:
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+macOS/Linux:
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+Upgrade pip:
+
+python -m pip install --upgrade pip
+
+Install ML/FastAPI dependencies:
+
+python -m pip install -r ml-services/requirements.txt
+
+The ML requirements include:
+- FastAPI
+- Uvicorn
+- Pydantic
+- NumPy
+- xarray
+- netCDF4
+- PyTorch
+
+==================================================
+4. COPERNICUS INGESTION ENVIRONMENT
+==================================================
+
+The ingestion dependencies are listed separately:
+
+ml-services/requirements-ingestion.txt
+
+They include:
+- copernicusmarine==2.4.1
+- netCDF4==1.7.2
+- scipy==1.16.2
+
+Recommended setup:
+
+Windows:
+
+python -m venv .copernicus-venv
+.\.copernicus-venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r ml-services/requirements-ingestion.txt
+
+macOS/Linux:
+
+python3 -m venv .copernicus-venv
+source .copernicus-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r ml-services/requirements-ingestion.txt
+
+NOTE:
+Copernicus data access may require the appropriate Copernicus Marine
+credentials/configuration and network access.
+
+==================================================
+5. VERIFY THE TRAINED MODEL
+==================================================
+
+The trained OceanEmbed V1 model is already included in the repository.
+
+Required files:
+
+data/processed/ML/ml_config.json
+
+data/processed/ML/checkpoints/
+    oceanembed_e2_seed42.pt
+    oceanembed_e2_seed123.pt
+    oceanembed_e2_seed2024.pt
+
+The three checkpoints form the V1 three-seed ensemble.
+
+Do NOT delete, rename, or move these files.
+
+==================================================
+6. FRONTEND SETUP
+==================================================
+
+Open a new terminal.
+
+cd frontend
+
+Install packages:
+
+npm install
+
+Run development server:
+
+npm run dev
+
+Expected frontend URL:
+
+http://localhost:5173
+
+For a production build:
+
+npm run build
+
+==================================================
+7. SPRING BOOT BACKEND
+==================================================
+
+Open another terminal.
+
+cd backend-api
+
+Run:
+
+mvn spring-boot:run
+
+Expected backend URL:
+
+http://localhost:8080
+
+Make sure Java 17 and Maven are available:
+
+java -version
+mvn -version
+
+==================================================
+8. POSTGRESQL
+==================================================
+
+Make sure PostgreSQL is installed and running.
+
+Configure the database according to the backend application's existing
+configuration/environment requirements.
+
+Do not commit personal database passwords or credentials to Git.
+
+==================================================
+9. FASTAPI ML SERVICE
+==================================================
+
+Open another terminal from the repository root.
+
+Activate the normal ML environment:
+
+Windows:
+
+.\.venv\Scripts\Activate.ps1
+
+macOS/Linux:
+
+source .venv/bin/activate
+
+Set PYTHONPATH so the project modules can be imported.
+
+Windows PowerShell:
+
+$env:PYTHONPATH="$PWD;$PWD\ml-services"
+
+Start FastAPI:
+
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+Expected ML API:
+
+http://127.0.0.1:8000
+
+NOTE:
+The exact ingestion Python interpreter can be selected by the application's
+existing ingestion-environment resolution logic. Keep the Copernicus
+environment available when live ingestion is required.
+
+==================================================
+10. STARTUP ORDER
+==================================================
+
+Recommended order:
+
+1. PostgreSQL
+2. FastAPI ML service
+3. Spring Boot backend
+4. React/Vite frontend
+
+Then open:
+
+http://localhost:5173
+
+==================================================
+11. MODEL CONTRACT
+==================================================
+
+OceanEmbed V1 uses:
+
+Input:
+- 7-day retrospective window
+- 7 surface variables
+- 64 x 64 spatial tile
+- 49 model input channels
+
+Surface variables:
+- SST
+- SSS
+- SLA
+- UO
+- VO
+- U Wind
+- V Wind
+
+Output:
+- 15 subsurface temperature depths
+- 32 x 32 spatial prediction
+- Temperature in degrees Celsius
+
+Target depths:
+
+0, 5, 10, 20, 30, 50, 75, 100,
+125, 150, 200, 300, 500, 700, 1000 m
+
+Official scientific domain:
+
+5°N–30°N
+45°E–105°E
+
+Spatial resolution:
+
+0.25° x 0.25°
+
+==================================================
+12. LIVE DAILY INFERENCE
+==================================================
+
+For a requested target date D, the model requires the seven-day window:
+
+D-6 through D
+
+The application must have all required surface variables for all seven days.
+
+If the required data is unavailable, the system should report that the data
+is not ready rather than substituting fake/test/future values.
+
+Live ingestion and daily data preparation are handled by the existing
+OceanEmbed ingestion pipeline.
+
+==================================================
+13. KNOWN DEMO TEST
+==================================================
+
+A previously verified working request was:
+
+Latitude : 15.5°N
+Longitude: 65.5°E
+Date     : 2026-09-21
+Depth    : 100 m
+
+Required seven-day window:
+
+2026-09-15 through 2026-09-21
+
+This produced a valid 15-depth OceanEmbed reconstruction.
+
+Another verified request:
+
+Latitude : 15.5°N
+Longitude: 95°E
+Date     : 2026-09-21
+
+All seven dates and seven variables were available.
+
+NOTE:
+The model's 64x64 input tile and 32x32 prediction region impose an
+implementation-level representable area inside the official domain.
+This is not a change to the official SIH domain.
+
+==================================================
+14. TROUBLESHOOTING
+==================================================
+
+A) Python import errors
+-----------------------
+Make sure the ML environment is activated.
+
+Windows:
+.\.venv\Scripts\Activate.ps1
+
+Then reinstall:
+
+python -m pip install -r ml-services/requirements.txt
+
+
+B) Copernicus ingestion errors
+------------------------------
+Make sure the Copernicus environment is activated and dependencies are
+installed:
+
+python -m pip install -r ml-services/requirements-ingestion.txt
+
+Also verify required Copernicus Marine credentials/access.
+
+
+C) Checkpoint not found
+-----------------------
+Verify:
+
+data/processed/ML/checkpoints/
+
+The following files must exist:
+
+oceanembed_e2_seed42.pt
+oceanembed_e2_seed123.pt
+oceanembed_e2_seed2024.pt
+
+
+D) ml_config.json error
+-----------------------
+Verify:
+
+data/processed/ML/ml_config.json
+
+Do not modify or replace it casually. The V1 inference engine uses it for
+the frozen model configuration and normalization statistics.
+
+
+E) Frontend does not start
+--------------------------
+Run:
+
+cd frontend
+npm install
+npm run dev
+
+
+F) Spring Boot does not start
+-----------------------------
+Verify:
+
+java -version
+mvn -version
+
+Then:
+
+cd backend-api
+mvn spring-boot:run
+
+
+G) Port already in use
+----------------------
+Check which application is using:
+- 5173 = frontend
+- 8080 = Spring Boot
+- 8000 = FastAPI
+
+Stop the conflicting process or use the application's supported port
+configuration.
+
+==================================================
+15. FINAL TEAMMATE CHECKLIST
+==================================================
+
+[ ] Git installed
+[ ] Python installed
+[ ] Node.js/npm installed
+[ ] JDK 17 installed
+[ ] Maven installed
+[ ] PostgreSQL installed/running
+[ ] Repository cloned
+[ ] .venv created
+[ ] ml-services/requirements.txt installed
+[ ] .copernicus-venv created
+[ ] requirements-ingestion.txt installed
+[ ] Three model checkpoints present
+[ ] ml_config.json present
+[ ] Frontend npm install completed
+[ ] FastAPI starts on port 8000
+[ ] Spring Boot starts on port 8080
+[ ] Frontend starts on port 5173
+[ ] Demo request can be tested
+
+==================================================
+16. IMPORTANT REPOSITORY RULES
+==================================================
+
+Do NOT commit:
+- passwords
+- API credentials
+- personal database credentials
+- local virtual environments
+- raw/live downloaded datasets
+- temporary runtime files
+- generated cache/lock files
+
+The trained V1 checkpoints are intentionally included in Git because they
+are required to run the existing trained model without retraining.
+
+END

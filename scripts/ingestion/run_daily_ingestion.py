@@ -6,19 +6,22 @@ import logging
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import numpy as np
-import xarray as xr
-
 from copernicus_sources import (
-    DOMAIN,
-    GRID_RESOLUTION_DEG,
     HISTORY_DAYS,
     OCEANEMBED_FEATURE_ORDER,
 )
 from fetch_daily_inputs import build_requests, run_download
+from live_window import (
+    cache_window_days,
+    latest_complete_target_date,
+    migrate_legacy_windows,
+    missing_cached_dates,
+    validate_window_file,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -28,18 +31,43 @@ STATUS_PATH = LIVE_PROCESSED_ROOT / "live_status.json"
 HARMONIZE_SCRIPT = Path(__file__).with_name("harmonize_live_data.py")
 
 REQUIRED_VARIABLES = OCEANEMBED_FEATURE_ORDER
-EXPECTED_LATITUDE = np.arange(
-    DOMAIN["lat_min"],
-    DOMAIN["lat_max"] + GRID_RESOLUTION_DEG / 2,
-    GRID_RESOLUTION_DEG,
-)
-EXPECTED_LONGITUDE = np.arange(
-    DOMAIN["lon_min"],
-    DOMAIN["lon_max"] + GRID_RESOLUTION_DEG / 2,
-    GRID_RESOLUTION_DEG,
-)
 
 LOGGER = logging.getLogger("oceanembed.daily_ingestion")
+
+
+@contextmanager
+def daily_cache_lock():
+    LIVE_PROCESSED_ROOT.mkdir(parents=True, exist_ok=True)
+    lock_path = LIVE_PROCESSED_ROOT / ".daily-cache.lock"
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+            import time
+
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            while True:
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +82,11 @@ def parse_args() -> argparse.Namespace:
         type=date.fromisoformat,
         help="Explicit Copernicus candidate date (YYYY-MM-DD).",
     )
+    parser.add_argument(
+        "--prepare-window",
+        action="store_true",
+        help="Resolve and cache daily inputs for the requested target date.",
+    )
     return parser.parse_args()
 
 
@@ -66,105 +99,21 @@ def parse_iso_date(value: str | None) -> date | None:
         return None
 
 
-def validate_harmonized_file(path: Path, target_date: date) -> list[str]:
-    """Return validation errors without treating land NaNs as missing data."""
-    errors: list[str] = []
-    expected_days = [
-        np.datetime64(target_date - timedelta(days=HISTORY_DAYS - 1) + timedelta(days=i))
-        for i in range(HISTORY_DAYS)
-    ]
-
-    try:
-        with xr.open_dataset(path) as dataset:
-            missing = [name for name in REQUIRED_VARIABLES if name not in dataset.data_vars]
-            if missing:
-                errors.append(f"missing variables: {', '.join(missing)}")
-                return errors
-
-            if "time" not in dataset.coords:
-                errors.append("missing time coordinate")
-            else:
-                actual_days = dataset.time.values.astype("datetime64[D]")
-                if len(actual_days) != HISTORY_DAYS:
-                    errors.append(
-                        f"time axis has {len(actual_days)} days; expected {HISTORY_DAYS}"
-                    )
-                elif not np.array_equal(actual_days, np.asarray(expected_days)):
-                    errors.append(
-                        "time axis does not exactly cover "
-                        f"{expected_days[0]} through {expected_days[-1]}"
-                    )
-
-            expected_coordinates = {
-                "latitude": EXPECTED_LATITUDE,
-                "longitude": EXPECTED_LONGITUDE,
-            }
-            for coordinate, expected in expected_coordinates.items():
-                if coordinate not in dataset.coords:
-                    errors.append(f"missing {coordinate} coordinate")
-                    continue
-                values = dataset[coordinate].values
-                if not np.allclose(values, expected, atol=1e-6):
-                    errors.append(
-                        f"{coordinate} grid does not match the "
-                        "5-30N / 45-105E 0.25-degree domain"
-                    )
-
-            for name in REQUIRED_VARIABLES:
-                if name not in dataset.data_vars:
-                    continue
-                values = dataset[name].values
-                if values.ndim != 3 or values.shape != (
-                    HISTORY_DAYS,
-                    len(EXPECTED_LATITUDE),
-                    len(EXPECTED_LONGITUDE),
-                ):
-                    errors.append(
-                        f"{name} dimensions {values.shape} do not match "
-                        "the seven-day model input grid"
-                    )
-                    continue
-
-                finite_per_day = np.isfinite(values).reshape(HISTORY_DAYS, -1).any(axis=1)
-                for index, has_finite_data in enumerate(finite_per_day):
-                    if not has_finite_data:
-                        errors.append(
-                            f"{name} has no valid finite values for "
-                            f"{expected_days[index]}"
-                        )
-                if not dataset[name].attrs.get("units"):
-                    errors.append(f"{name} is missing its units metadata")
-
-            if str(dataset.attrs.get("target_date", "")) != target_date.isoformat():
-                errors.append("target_date metadata does not match the requested date")
-            if int(dataset.attrs.get("history_days", -1)) != HISTORY_DAYS:
-                errors.append(f"history_days metadata must be {HISTORY_DAYS}")
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        errors.append(f"cannot open or validate NetCDF: {exc}")
-
-    return errors
+def validate_harmonized_file(
+    path: Path,
+    target_date: date,
+    window_start: date | None = None,
+) -> list[str]:
+    return validate_window_file(path, target_date, window_start)
 
 
 def discover_latest_usable() -> date | None:
-    candidates = sorted(
-        LIVE_PROCESSED_ROOT.glob("????-??-??/oceanembed_live_*.nc"),
-        reverse=True,
-    )
-    for path in candidates:
-        target_date = parse_iso_date(path.parent.name)
-        if target_date is None:
-            continue
-        errors = validate_harmonized_file(path, target_date)
-        if errors:
-            LOGGER.warning(
-                "Ignoring unvalidated live dataset %s: %s",
-                path,
-                "; ".join(errors),
-            )
-            continue
-        LOGGER.info("Latest validated local Copernicus date: %s", target_date)
-        return target_date
-    return None
+    with daily_cache_lock():
+        migrate_legacy_windows()
+        latest = latest_complete_target_date()
+    if latest is not None:
+        LOGGER.info("Latest complete local Copernicus window ends at %s", latest)
+    return latest
 
 
 def discover_candidate(latest_usable: date | None) -> date:
@@ -231,84 +180,112 @@ def run_script(script: Path, *arguments: str) -> None:
 
 
 def process_candidate(candidate: date) -> tuple[bool, str]:
-    date_text = candidate.isoformat()
-    LOGGER.info(
-        "Attempting Copernicus inputs for %s through %s "
-        "(retrospective %d-day window)",
-        candidate - timedelta(days=HISTORY_DAYS - 1),
-        candidate,
-        HISTORY_DAYS,
-    )
-    raw_directory = LIVE_RAW_ROOT / date_text
-    source_variables = {
-        "sst": ("sst",),
-        "sss": ("sss",),
-        "sla": ("sla",),
-        "currents": ("uo", "vo"),
-        "winds": ("u_wind", "v_wind"),
-    }
-    failed_sources: list[str] = []
-    for request in build_requests(candidate):
-        try:
-            # Refresh existing incomplete downloads so delayed feeds are retried.
-            run_download(request, raw_directory, force=True)
-        except (OSError, RuntimeError) as exc:
-            variables = ", ".join(source_variables.get(request.name, (request.name,)))
-            LOGGER.error(
-                "Missing or incomplete variable(s) %s for %s: %s",
-                variables,
-                candidate,
-                exc,
-            )
-            failed_sources.append(variables)
+    return prepare_requested_window(candidate)
 
-    if failed_sources:
-        message = (
-            f"Copernicus source download incomplete for {candidate}; "
-            f"unavailable variables: {', '.join(failed_sources)}. "
-            "The previous validated date remains latest usable."
+
+def prepare_requested_window(target_date: date) -> tuple[bool, str]:
+    with daily_cache_lock():
+        return _prepare_requested_window_locked(target_date)
+
+
+def _prepare_requested_window_locked(target_date: date) -> tuple[bool, str]:
+    migrate_legacy_windows()
+    missing = missing_cached_dates(target_date)
+    if not missing:
+        return True, (
+            f"Complete 7-day input window available for {target_date}; "
+            "all daily observations were reused from cache"
         )
-        LOGGER.error("%s", message)
-        return False, message
 
-    staging_directory = LIVE_PROCESSED_ROOT / date_text
+    raw_directory = LIVE_RAW_ROOT / "ranges"
+    staging_directory = LIVE_PROCESSED_ROOT / ".staging"
     staging_directory.mkdir(parents=True, exist_ok=True)
-    staging_path = staging_directory / f".oceanembed_live_{date_text}.staging.nc"
-    published_path = staging_directory / f"oceanembed_live_{date_text}.nc"
-    if staging_path.exists():
-        staging_path.unlink()
 
-    try:
-        run_script(
-            HARMONIZE_SCRIPT,
-            "--date",
-            date_text,
-            "--output",
-            str(staging_path),
-        )
-    except subprocess.CalledProcessError as exc:
-        message = (
-            f"Harmonization incomplete for {candidate}; inspect the logged "
-            "variable/date error. The previous validated date remains latest usable."
-        )
-        LOGGER.error("%s Harmonizer exited with status %s.", message, exc.returncode)
-        if staging_path.exists():
-            staging_path.unlink()
-        return False, message
+    LOGGER.info(
+        "Resolving target %s input window; fetching uncached dates %s",
+        target_date,
+        ", ".join(day.isoformat() for day in missing),
+    )
+    missing_groups: list[list[date]] = []
+    for day in missing:
+        if (
+            not missing_groups
+            or day != missing_groups[-1][-1] + timedelta(days=1)
+        ):
+            missing_groups.append([day])
+        else:
+            missing_groups[-1].append(day)
 
-    validation_errors = validate_harmonized_file(staging_path, candidate)
-    if validation_errors:
-        for error in validation_errors:
-            LOGGER.error("Candidate %s validation failed: %s", candidate, error)
-        staging_path.unlink(missing_ok=True)
+    for group in missing_groups:
+        window_start = group[0]
+        fetch_end = group[-1]
+        range_name = f"{window_start.isoformat()}_{fetch_end.isoformat()}"
+        staging_path = staging_directory / f"oceanembed_live_{range_name}.nc"
+        try:
+            requests = build_requests(fetch_end, window_start=window_start)
+            for attempt in range(2):
+                staging_path.unlink(missing_ok=True)
+                for request in requests:
+                    run_download(
+                        request,
+                        raw_directory,
+                        force=attempt == 1,
+                    )
+                run_script(
+                    HARMONIZE_SCRIPT,
+                    "--date",
+                    fetch_end.isoformat(),
+                    "--window-start",
+                    window_start.isoformat(),
+                    "--output",
+                    str(staging_path),
+                )
+                errors = validate_harmonized_file(
+                    staging_path,
+                    fetch_end,
+                    window_start,
+                )
+                if not errors:
+                    break
+                if attempt == 1:
+                    raise ValueError("; ".join(errors))
+                LOGGER.warning(
+                    "Downloaded range %s failed validation; refreshing cached "
+                    "source files once: %s",
+                    range_name,
+                    "; ".join(errors),
+                )
+            published = cache_window_days(
+                staging_path,
+                fetch_end,
+                window_start,
+                only_dates=set(group),
+            )
+            LOGGER.info(
+                "Cached validated daily observations: %s",
+                ", ".join(day.isoformat() for day in published),
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            remaining = missing_cached_dates(target_date)
+            return False, (
+                f"Could not prepare requested input window for {target_date}: {exc}. "
+                "Missing dates: "
+                + (", ".join(day.isoformat() for day in remaining) or "none")
+            )
+        finally:
+            staging_path.unlink(missing_ok=True)
+
+    remaining = missing_cached_dates(target_date)
+    if remaining:
         return False, (
-            f"Harmonized input window for {candidate} failed validation; "
-            "the previous validated date remains latest usable."
+            f"Requested input window for {target_date} is incomplete. "
+            "Missing dates: "
+            + ", ".join(day.isoformat() for day in remaining)
         )
-
-    os.replace(staging_path, published_path)
-    LOGGER.info("Published validated live dataset: %s", published_path)
-    return True, f"Complete 7-day input window available for {candidate}"
+    return True, (
+        f"Complete 7-day input window available for {target_date}; "
+        "daily observations were fetched, harmonized, validated, and cached"
+    )
 
 
 def main() -> int:
@@ -317,6 +294,19 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = parse_args()
+    if args.prepare_window:
+        if args.date is None:
+            LOGGER.error("--prepare-window requires --date")
+            return 2
+        success, message = prepare_requested_window(args.date)
+        latest_usable = latest_complete_target_date()
+        write_status(latest_usable, args.date, message)
+        if success:
+            LOGGER.info("%s", message)
+            return 0
+        LOGGER.warning("%s", message)
+        return 1
+
     latest_usable = discover_latest_usable()
     candidate = args.date or discover_candidate(latest_usable)
 

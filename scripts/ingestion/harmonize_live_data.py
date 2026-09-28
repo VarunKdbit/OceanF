@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +52,13 @@ def parse_args() -> argparse.Namespace:
         "--date",
         required=True,
         help="Target date in YYYY-MM-DD format.",
+    )
+    parser.add_argument(
+        "--window-start",
+        help=(
+            "First day of a requested date range. Defaults to the "
+            "seven-day retrospective window."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -484,13 +492,14 @@ def load_winds(
 
 def validate_time_axis(
     arrays: dict[str, xr.DataArray],
+    expected_days: int = HISTORY_DAYS,
 ) -> None:
 
     reference = arrays["sst"].time.values
 
-    if len(reference) != HISTORY_DAYS:
+    if len(reference) != expected_days:
         raise ValueError(
-            f"Expected {HISTORY_DAYS} daily "
+            f"Expected {expected_days} daily "
             f"timesteps, got {len(reference)}."
         )
 
@@ -502,10 +511,10 @@ def validate_time_axis(
                 "a time dimension."
             )
 
-        if len(da.time) != HISTORY_DAYS:
+        if len(da.time) != expected_days:
             raise ValueError(
                 f"{name} contains {len(da.time)} "
-                f"timesteps; expected {HISTORY_DAYS}."
+                f"timesteps; expected {expected_days}."
             )
 
         if not np.array_equal(
@@ -578,6 +587,7 @@ def build_output(
     arrays: dict[str, xr.DataArray],
     sss_metadata: dict,
 ) -> xr.Dataset:
+    history_days = arrays["sst"].sizes["time"]
 
     output = xr.Dataset(
         {
@@ -596,7 +606,7 @@ def build_output(
             "OceanEmbed Live Surface Inputs"
         ),
         "target_date": target_date,
-        "history_days": HISTORY_DAYS,
+        "history_days": history_days,
         "grid_resolution": (
             GRID_RESOLUTION_DEG
         ),
@@ -628,10 +638,28 @@ def main() -> None:
     args = parse_args()
 
     target_date = args.date
+    target_day = date.fromisoformat(target_date)
+    window_start_day = (
+        date.fromisoformat(args.window_start)
+        if args.window_start
+        else target_day - timedelta(days=HISTORY_DAYS - 1)
+    )
+    if window_start_day > target_day:
+        raise ValueError("--window-start must not be later than --date")
+    range_start = window_start_day.isoformat()
+    range_suffix = (
+        f"{target_date}_7day"
+        if window_start_day == target_day - timedelta(days=HISTORY_DAYS - 1)
+        else f"{range_start}_{target_date}"
+    )
 
     raw_dir = (
         LIVE_RAW_ROOT
-        / target_date
+        / (
+            target_date
+            if not args.window_start
+            else "ranges"
+        )
     )
 
     output_dir = (
@@ -652,27 +680,27 @@ def main() -> None:
 
     sst_path = (
         raw_dir
-        / f"sst_{target_date}_7day.nc"
+        / f"sst_{range_suffix}.nc"
     )
 
     sss_path = (
         raw_dir
-        / f"sss_{target_date}_7day.nc"
+        / f"sss_{range_suffix}.nc"
     )
 
     sla_path = (
         raw_dir
-        / f"sla_{target_date}_7day.nc"
+        / f"sla_{range_suffix}.nc"
     )
 
     currents_path = (
         raw_dir
-        / f"currents_{target_date}_7day.nc"
+        / f"currents_{range_suffix}.nc"
     )
 
     winds_path = (
         raw_dir
-        / f"winds_{target_date}_7day_hourly.nc"
+        / f"winds_{range_suffix}_hourly.nc"
     )
 
     print("=" * 72)
@@ -714,7 +742,8 @@ def main() -> None:
 
     print("Validating time axis...")
 
-    validate_time_axis(arrays)
+    expected_days = (target_day - window_start_day).days + 1
+    validate_time_axis(arrays, expected_days)
 
     print("Validating target grid...")
 

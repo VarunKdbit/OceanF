@@ -37,6 +37,24 @@ public class PredictionService {
     @Transactional
     public PredictionResponseDTO createPrediction(PredictionRequestDTO requestDto) {
         validateDepths(requestDto.getDepths());
+        SurfaceCoverageDTO coverage = fastApiClient.checkCoverage(
+                requestDto.getLatitude(),
+                requestDto.getLongitude(),
+                requestDto.getDate());
+        if (!coverage.isReady()) {
+            List<String> missingDates = coverage.getMissingDates() == null
+                    ? List.of()
+                    : coverage.getMissingDates();
+            throw new ModelServiceException(
+                    "INCOMPLETE_DATA: " + coverage.getMessage()
+                            + "; missing variables: "
+                            + String.join(", ", coverage.getMissingVariables())
+                            + (missingDates.isEmpty()
+                                    ? ""
+                                    : "; missing dates: " + String.join(", ", missingDates)),
+                    422
+            );
+        }
 
         LocalDate inputWindowStart = requestDto.getDate().minusDays(6);
         LocalDate inputWindowEnd = requestDto.getDate();
@@ -108,6 +126,13 @@ public class PredictionService {
             jobRepository.save(job);
             throw ex;
         }
+    }
+
+    public SurfaceCoverageDTO getCoverage(
+            double latitude,
+            double longitude,
+            LocalDate date) {
+        return fastApiClient.checkCoverage(latitude, longitude, date);
     }
 
     @Transactional(readOnly = true)

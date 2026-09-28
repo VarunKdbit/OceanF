@@ -22,7 +22,7 @@ spring:
 ml-service:
   base-url: ${ML_SERVICE_URL:http://localhost:8000}
   connect-timeout-ms: 3000
-  read-timeout-ms: 10000
+  read-timeout-ms: 600000
 
 live:
   status-file: ${LIVE_STATUS_FILE:../data/processed/live/live_status.json}

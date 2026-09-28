@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -97,10 +100,20 @@ def get_source_variables(source) -> tuple[str, ...]:
 
 def build_requests(
     target_date: date,
+    window_start: date | None = None,
 ) -> list[DownloadRequest]:
 
-    start_datetime, end_datetime = (
-        build_datetime_range(target_date)
+    default_start = target_date - timedelta(days=HISTORY_DAYS - 1)
+    start_date = window_start or default_start
+    if start_date > target_date:
+        raise ValueError("window_start must not be later than target_date")
+
+    start_datetime = f"{start_date.isoformat()} 00:00:00"
+    end_datetime = f"{target_date.isoformat()} 23:59:59"
+    suffix = (
+        f"{target_date.isoformat()}_7day"
+        if start_date == default_start
+        else f"{start_date.isoformat()}_{target_date.isoformat()}"
     )
 
     requests: list[DownloadRequest] = []
@@ -119,7 +132,7 @@ def build_requests(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             output_filename=(
-                f"sst_{target_date.isoformat()}_7day.nc"
+                f"sst_{suffix}.nc"
             ),
         )
     )
@@ -146,7 +159,7 @@ def build_requests(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             output_filename=(
-                f"sss_{target_date.isoformat()}_7day.nc"
+                f"sss_{suffix}.nc"
             ),
             minimum_depth=SSS_SURFACE_DEPTH_M,
             maximum_depth=SSS_SURFACE_DEPTH_M,
@@ -167,7 +180,7 @@ def build_requests(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             output_filename=(
-                f"sla_{target_date.isoformat()}_7day.nc"
+                f"sla_{suffix}.nc"
             ),
         )
     )
@@ -186,7 +199,7 @@ def build_requests(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             output_filename=(
-                f"currents_{target_date.isoformat()}_7day.nc"
+                f"currents_{suffix}.nc"
             ),
         )
     )
@@ -209,7 +222,7 @@ def build_requests(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             output_filename=(
-                f"winds_{target_date.isoformat()}_7day_hourly.nc"
+                f"winds_{suffix}_hourly.nc"
             ),
         )
     )
@@ -226,8 +239,15 @@ def build_subset_command(
     output_directory: Path,
 ) -> list[str]:
 
+    executable_name = "copernicusmarine.exe" if os.name == "nt" else "copernicusmarine"
+    local_executable = Path(sys.executable).parent / executable_name
+    executable = (
+        str(local_executable)
+        if local_executable.is_file()
+        else shutil.which("copernicusmarine") or "copernicusmarine"
+    )
     command = [
-        "copernicusmarine",
+        executable,
         "subset",
         "--dataset-id",
         request.dataset_id,

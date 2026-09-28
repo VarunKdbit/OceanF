@@ -53,6 +53,25 @@ class PredictionRequest(BaseModel):
         return sorted(set(value))
 
 
+class SurfaceCoverageResponse(BaseModel):
+    ready: bool
+    latitude: float
+    longitude: float
+    snappedLatitude: Optional[float] = None
+    snappedLongitude: Optional[float] = None
+    date: date
+    targetDate: date
+    windowStart: date
+    windowEnd: date
+    availableDates: List[str]
+    missingDates: List[str]
+    requiredVariables: int
+    variablesReady: int
+    readyVariables: List[str]
+    missingVariables: List[str]
+    message: str
+
+
 class DepthPrediction(BaseModel):
     depth_m: int
     temperature_c: float

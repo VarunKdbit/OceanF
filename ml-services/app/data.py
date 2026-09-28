@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ML_DIR = PROJECT_ROOT / "data" / "processed" / "ML"
 HARMONIZED_DIR = ML_DIR / "harmonized"
 LIVE_DIR = PROJECT_ROOT / "data" / "processed" / "live"
+LIVE_DAILY_DIR = LIVE_DIR / "daily"
 CONFIG_PATH = ML_DIR / "ml_config.json"
 
 
@@ -542,14 +543,28 @@ class OceanEmbedDataLoader:
             pass
 
 
+class LiveWindowUnavailableError(FileNotFoundError):
+    def __init__(self, missing_dates: list[str]) -> None:
+        self.missing_dates = missing_dates
+        super().__init__(
+            "Requested live input window is missing daily data for: "
+            + ", ".join(missing_dates)
+        )
+
+
 class LiveOceanEmbedDataLoader:
     """
-    Loads one seven-day live OceanEmbed harmonized NetCDF file.
+    Loads a live OceanEmbed input window from either a legacy
+    seven-day file or the validated daily cache.
 
-    Expected file:
+    Legacy file:
 
         data/processed/live/<date>/
             oceanembed_live_<date>.nc
+
+    Daily cache:
+
+        data/processed/live/daily/oceanembed_live_<date>.nc
 
     Expected variables:
 
@@ -584,16 +599,8 @@ class LiveOceanEmbedDataLoader:
             )
         )
 
-        if not self.path.exists():
-            raise FileNotFoundError(
-                f"Live OceanEmbed dataset not found: "
-                f"{self.path}"
-            )
-
-        self.ds = Dataset(
-            self.path,
-            "r",
-        )
+        self.ds: Dataset | None = None
+        self.daily_datasets: list[Dataset] = []
 
         self.variable_names: dict[
             str,
@@ -606,12 +613,80 @@ class LiveOceanEmbedDataLoader:
         self.longitudes: np.ndarray | None = None
 
         try:
-            self._validate()
+            target = date.fromisoformat(self.target_date)
+            from datetime import timedelta
+
+            daily_paths = [
+                LIVE_DAILY_DIR
+                / f"oceanembed_live_{(target - timedelta(days=HISTORY_DAYS - 1 - index)).isoformat()}.nc"
+                for index in range(HISTORY_DAYS)
+            ]
+            if all(path.is_file() for path in daily_paths):
+                try:
+                    self._open_daily_cache()
+                except (KeyError, OSError, ValueError):
+                    self.close()
+                    self.latitudes = None
+                    self.longitudes = None
+                    self.variable_names = {}
+                    self.dates = []
+                    if not self.path.is_file():
+                        raise
+                    self.ds = Dataset(self.path, "r")
+                    self._validate_legacy()
+            elif self.path.is_file():
+                self.ds = Dataset(self.path, "r")
+                try:
+                    self._validate_legacy()
+                except (KeyError, OSError, ValueError):
+                    self.ds.close()
+                    self.ds = None
+                    self.dates = []
+                    self.latitudes = None
+                    self.longitudes = None
+                    self.variable_names = {}
+                    self._open_daily_cache()
+            else:
+                self._open_daily_cache()
         except Exception:
             self.close()
             raise
 
-    def _validate(self) -> None:
+    @staticmethod
+    def _expected_coordinates() -> tuple[np.ndarray, np.ndarray]:
+        return (
+            np.arange(LAT_MIN, LAT_MAX + RESOLUTION / 2, RESOLUTION),
+            np.arange(LON_MIN, LON_MAX + RESOLUTION / 2, RESOLUTION),
+        )
+
+    def _validate_coordinates(self, dataset: Dataset) -> None:
+        if "latitude" not in dataset.variables or "longitude" not in dataset.variables:
+            raise KeyError("Live dataset is missing latitude/longitude coordinates.")
+
+        latitudes = np.asarray(dataset.variables["latitude"][:], dtype=np.float64)
+        longitudes = np.asarray(dataset.variables["longitude"][:], dtype=np.float64)
+        expected_lat, expected_lon = self._expected_coordinates()
+        if len(latitudes) != LAT_SIZE or not np.allclose(
+            latitudes, expected_lat, atol=1e-5
+        ):
+            raise ValueError("Live dataset latitude grid does not match 5..30N at 0.25 degrees.")
+        if len(longitudes) != LON_SIZE or not np.allclose(
+            longitudes, expected_lon, atol=1e-5
+        ):
+            raise ValueError("Live dataset longitude grid does not match 45..105E at 0.25 degrees.")
+        if self.latitudes is None:
+            self.latitudes = latitudes
+            self.longitudes = longitudes
+        elif not np.array_equal(self.latitudes, latitudes) or not np.array_equal(
+            self.longitudes, longitudes
+        ):
+            raise ValueError("Daily live files do not share the same model grid.")
+
+    def _validate_variables(
+        self,
+        dataset: Dataset,
+        expected_days: int,
+    ) -> list[str]:
         required_variables = [
             "sst",
             "sss",
@@ -623,7 +698,7 @@ class LiveOceanEmbedDataLoader:
         ]
 
         for feature in required_variables:
-            if feature not in self.ds.variables:
+            if feature not in dataset.variables:
                 raise KeyError(
                     f"Live dataset is missing required "
                     f"variable: {feature}"
@@ -633,85 +708,33 @@ class LiveOceanEmbedDataLoader:
                 feature
             ] = feature
 
-        if "time" not in self.ds.variables:
+            if tuple(dataset.variables[feature].shape) != (
+                expected_days,
+                LAT_SIZE,
+                LON_SIZE,
+            ):
+                raise ValueError(
+                    f"{feature}: unexpected live dataset shape "
+                    f"{tuple(dataset.variables[feature].shape)}"
+                )
+
+        if "time" not in dataset.variables:
             raise KeyError(
                 "Live dataset is missing time coordinate."
             )
 
-        if "latitude" not in self.ds.variables:
-            raise KeyError(
-                "Live dataset is missing latitude coordinate."
-            )
-
-        if "longitude" not in self.ds.variables:
-            raise KeyError(
-                "Live dataset is missing longitude coordinate."
-            )
-
-        self.latitudes = np.asarray(
-            self.ds.variables[
-                "latitude"
-            ][:],
-            dtype=np.float64,
-        )
-
-        self.longitudes = np.asarray(
-            self.ds.variables[
-                "longitude"
-            ][:],
-            dtype=np.float64,
-        )
-
-        self.dates = (
-            OceanEmbedDataLoader
-            ._dates_from_dataset(self.ds)
-        )
-
-        expected_lat = np.arange(
-            LAT_MIN,
-            LAT_MAX + RESOLUTION / 2,
-            RESOLUTION,
-        )
-
-        expected_lon = np.arange(
-            LON_MIN,
-            LON_MAX + RESOLUTION / 2,
-            RESOLUTION,
-        )
-
-        if (
-            len(self.latitudes) != LAT_SIZE
-            or not np.allclose(
-                self.latitudes,
-                expected_lat,
-                atol=1e-5,
-            )
-        ):
+        dates = OceanEmbedDataLoader._dates_from_dataset(dataset)
+        if len(dates) != expected_days:
             raise ValueError(
-                "Live dataset latitude grid does not "
-                "match 5..30N at 0.25 degrees."
+                f"Live dataset must contain exactly {expected_days} days; "
+                f"got {len(dates)}."
             )
+        self._validate_coordinates(dataset)
+        return dates
 
-        if (
-            len(self.longitudes) != LON_SIZE
-            or not np.allclose(
-                self.longitudes,
-                expected_lon,
-                atol=1e-5,
-            )
-        ):
-            raise ValueError(
-                "Live dataset longitude grid does not "
-                "match 45..105E at 0.25 degrees."
-            )
-
-        if len(self.dates) != HISTORY_DAYS:
-            raise ValueError(
-                f"Live dataset must contain exactly "
-                f"{HISTORY_DAYS} days; got "
-                f"{len(self.dates)}."
-            )
-
+    def _validate_legacy(self) -> None:
+        assert self.ds is not None
+        self.dates = self._validate_variables(self.ds, HISTORY_DAYS)
         if self.dates[-1] != self.target_date:
             raise ValueError(
                 f"Live dataset final date is "
@@ -719,24 +742,48 @@ class LiveOceanEmbedDataLoader:
                 f"{self.target_date}."
             )
 
-        expected_shape = (
-            HISTORY_DAYS,
-            LAT_SIZE,
-            LON_SIZE,
-        )
+    def _open_daily_cache(self) -> None:
+        from datetime import timedelta
 
-        for feature in required_variables:
-            variable = self.ds.variables[
-                feature
+        target = date.fromisoformat(self.target_date)
+        expected_days = [
+            target - timedelta(days=HISTORY_DAYS - 1 - index)
+            for index in range(HISTORY_DAYS)
+        ]
+        missing_paths = [
+            LIVE_DAILY_DIR / f"oceanembed_live_{day.isoformat()}.nc"
+            for day in expected_days
+            if not (LIVE_DAILY_DIR / f"oceanembed_live_{day.isoformat()}.nc").is_file()
+        ]
+        if missing_paths:
+            missing_dates = [
+                path.stem.removeprefix("oceanembed_live_")
+                for path in missing_paths
             ]
+            raise LiveWindowUnavailableError(missing_dates)
 
-            if tuple(variable.shape) != expected_shape:
-                raise ValueError(
-                    f"{feature}: unexpected live "
-                    f"dataset shape "
-                    f"{tuple(variable.shape)}; "
-                    f"expected {expected_shape}."
-                )
+        dates: list[str] = []
+        for day in expected_days:
+            path = LIVE_DAILY_DIR / f"oceanembed_live_{day.isoformat()}.nc"
+            try:
+                dataset = Dataset(path, "r")
+                self.daily_datasets.append(dataset)
+                dataset_dates = self._validate_variables(dataset, 1)
+                if dataset_dates != [day.isoformat()]:
+                    raise ValueError(
+                        f"Daily live dataset {path} contains {dataset_dates}, "
+                        f"expected {day.isoformat()}."
+                    )
+                self._validate_coordinates(dataset)
+                dates.extend(dataset_dates)
+            except (KeyError, OSError, ValueError) as exc:
+                raise LiveWindowUnavailableError([day.isoformat()]) from exc
+        self.dates = dates
+        if self.dates != [day.isoformat() for day in expected_days]:
+            raise ValueError(
+                "Daily live cache does not exactly match the requested input window."
+            )
+        self.variable_names = {feature: feature for feature in FEATURES}
 
     def get_window(
         self,
@@ -833,22 +880,26 @@ class LiveOceanEmbedDataLoader:
         ] = {}
 
         for feature in FEATURES:
-            variable = self.ds.variables[
-                self.variable_names[feature]
-            ]
-
-            values = (
-                variable[
+            if self.ds is not None:
+                variable = self.ds.variables[self.variable_names[feature]]
+                values = variable[
                     :,
                     tile_row:tile_row + INPUT_SIZE,
                     tile_col:tile_col + INPUT_SIZE,
                 ]
-            )
-
-            values = (
-                OceanEmbedDataLoader
-                ._masked_to_float32(values)
-            )
+                values = OceanEmbedDataLoader._masked_to_float32(values)
+            else:
+                daily_values = []
+                for dataset in self.daily_datasets:
+                    values_for_day = dataset.variables[feature][
+                        :,
+                        tile_row:tile_row + INPUT_SIZE,
+                        tile_col:tile_col + INPUT_SIZE,
+                    ]
+                    daily_values.append(
+                        OceanEmbedDataLoader._masked_to_float32(values_for_day)[0]
+                    )
+                values = np.stack(daily_values, axis=0)
 
             expected = (
                 HISTORY_DAYS,
@@ -878,16 +929,23 @@ class LiveOceanEmbedDataLoader:
             "snapped_latitude": snapped_lat,
             "snapped_longitude": snapped_lon,
             "source": "live",
-            "live_file": str(self.path),
+            "live_file": str(self.path) if self.ds is not None else str(LIVE_DAILY_DIR),
         }
 
         return feature_arrays, metadata
 
     def close(self) -> None:
         try:
-            self.ds.close()
+            if self.ds is not None:
+                self.ds.close()
         except Exception:
             pass
+        for dataset in self.daily_datasets:
+            try:
+                dataset.close()
+            except Exception:
+                pass
+        self.daily_datasets.clear()
 
     def __del__(self) -> None:
         try:

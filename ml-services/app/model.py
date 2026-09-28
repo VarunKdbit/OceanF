@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+import os
+import subprocess
+import sys
+import threading
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from importlib.util import find_spec
 from math import isfinite
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from app.config import settings
 from app.data import (
     LIVE_DIR,
     LiveOceanEmbedDataLoader,
+    LiveWindowUnavailableError,
     OceanEmbedDataLoader,
 )
 from app.schemas import (
     DepthPrediction,
     PredictionRequest,
     PredictionResponse,
+    SurfaceCoverageResponse,
     SurfaceObservation,
 )
 
@@ -49,6 +59,33 @@ SURFACE_OBSERVATIONS = (
     ("u_wind", "U Wind", "m/s"),
     ("v_wind", "V Wind", "m/s"),
 )
+SURFACE_FEATURES = tuple(feature for feature, _, _ in SURFACE_OBSERVATIONS)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+INGESTION_SCRIPT = PROJECT_ROOT / "scripts" / "ingestion" / "run_daily_ingestion.py"
+# Historical coverage begins here; live dates may extend through today.
+SUPPORTED_APPLICATION_START = date(2025, 7, 1)
+
+
+@dataclass
+class _LivePreparation:
+    completed: threading.Event = field(default_factory=threading.Event)
+    waiters: int = 0
+    error: Exception | None = None
+
+
+_LIVE_PREPARATIONS: dict[date, _LivePreparation] = {}
+_LIVE_PREPARATIONS_GUARD = threading.Lock()
+
+
+def _live_preparation(target_date: date) -> tuple[_LivePreparation, bool]:
+    with _LIVE_PREPARATIONS_GUARD:
+        preparation = _LIVE_PREPARATIONS.get(target_date)
+        if preparation is not None:
+            preparation.waiters += 1
+            return preparation, False
+        preparation = _LivePreparation()
+        _LIVE_PREPARATIONS[target_date] = preparation
+        return preparation, True
 
 
 class OceanEmbedModel:
@@ -272,85 +309,289 @@ class OceanEmbedModel:
             request.date
         )
 
-        live_file = self._live_file_for_date(
-            target_date
-        )
+        live_file = self._live_file_for_date(target_date)
+        live_error: Exception | None = None
 
-        # ----------------------------------------------------
-        # LIVE PATH
-        # ----------------------------------------------------
-
-        if live_file.exists():
-
-            logger.info(
-                "Using LIVE OceanEmbed dataset: %s",
-                live_file,
-            )
-
-            live_loader = None
-
+        def load_live_window():
+            live_loader = LiveOceanEmbedDataLoader(target_date)
             try:
-                live_loader = LiveOceanEmbedDataLoader(
-                    target_date
+                feature_arrays, metadata = live_loader.get_window(
+                    latitude=request.latitude,
+                    longitude=request.longitude,
                 )
-
-                feature_arrays, metadata = (
-                    live_loader.get_window(
-                        latitude=request.latitude,
-                        longitude=request.longitude,
-                    )
-                )
-
-                # Make the source explicit for debugging,
-                # API logging and frontend integration.
                 metadata["source"] = "live"
-
-                metadata["live_file"] = str(
-                    live_file
-                )
-
-                return (
-                    feature_arrays,
-                    metadata,
-                )
-
+                metadata["live_file"] = str(live_file)
+                return feature_arrays, metadata
             finally:
-                if live_loader is not None:
-                    live_loader.close()
+                live_loader.close()
 
-        # ----------------------------------------------------
-        # HISTORICAL FALLBACK
-        # ----------------------------------------------------
+        try:
+            return load_live_window()
+        except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
+            live_error = exc
+
+        target_text = target_date.isoformat()
+        historical_has_target = (
+            self.data_loader is not None
+            and target_text in self.data_loader.dates
+        )
+        if not historical_has_target:
+            # Final defensive guard: never launch live ingestion for dates
+            # outside the supported application range.
+            if (
+                target_date < SUPPORTED_APPLICATION_START
+                or target_date > date.today()
+            ):
+                logger.info(
+                    "Skipping live ingestion for out-of-range date %s "
+                    "(supported %s through %s)",
+                    target_text,
+                    SUPPORTED_APPLICATION_START.isoformat(),
+                    date.today().isoformat(),
+                )
+            else:
+                self._prepare_live_window(target_date)
+                try:
+                    return load_live_window()
+                except (FileNotFoundError, OSError, KeyError, ValueError) as exc:
+                    live_error = exc
 
         if self.data_loader is None:
             raise RuntimeError(
                 "Historical OceanEmbed data loader is unavailable."
             )
 
-        logger.info(
-            "Live dataset not found for %s. "
-            "Using historical OceanEmbed dataset.",
-            target_date.isoformat(),
-        )
-
-        feature_arrays, metadata = (
-            self.data_loader.get_window(
+        if historical_has_target:
+            logger.info(
+                "Live daily window is unavailable for %s; using the existing "
+                "historical fallback for the same target date.",
+                target_text,
+            )
+            feature_arrays, metadata = self.data_loader.get_window(
                 target_date=target_date,
                 latitude=request.latitude,
                 longitude=request.longitude,
             )
-        )
+            metadata["source"] = "historical"
+            return feature_arrays, metadata
 
-        metadata["source"] = "historical"
+        missing_dates = [
+            (target_date - timedelta(days=HISTORY_DAYS - 1 - index)).isoformat()
+            for index in range(HISTORY_DAYS)
+            if not (
+                LIVE_DIR
+                / "daily"
+                / f"oceanembed_live_{(target_date - timedelta(days=HISTORY_DAYS - 1 - index)).isoformat()}.nc"
+            ).is_file()
+        ]
+        raise LiveWindowUnavailableError(missing_dates) from live_error
 
-        return (
-            feature_arrays,
-            metadata,
+    @staticmethod
+    def _ingestion_python() -> str:
+        configured = os.environ.get("OCEANEMBED_INGESTION_PYTHON")
+        if configured:
+            return configured
+        if find_spec("copernicusmarine") is not None:
+            return sys.executable
+        executable_name = "python.exe" if os.name == "nt" else "python"
+        environment = (
+            ".copernicus-venv/Scripts"
+            if os.name == "nt"
+            else ".copernicus-venv/bin"
         )
+        candidate = PROJECT_ROOT / environment / executable_name
+        if candidate.is_file():
+            return str(candidate)
+        return sys.executable
+
+    def _prepare_live_window(self, target_date: date) -> None:
+        preparation, is_owner = _live_preparation(target_date)
+        if not is_owner:
+            preparation.completed.wait()
+            with _LIVE_PREPARATIONS_GUARD:
+                preparation.waiters -= 1
+            if preparation.error is not None:
+                raise preparation.error
+            return
+
+        try:
+            try:
+                live_loader = LiveOceanEmbedDataLoader(target_date)
+            except (FileNotFoundError, OSError, KeyError, ValueError):
+                pass
+            else:
+                live_loader.close()
+                return
+            self._run_live_window_preparation(target_date)
+        except Exception as exc:
+            preparation.error = exc
+            raise
+        finally:
+            with _LIVE_PREPARATIONS_GUARD:
+                if _LIVE_PREPARATIONS.get(target_date) is preparation:
+                    del _LIVE_PREPARATIONS[target_date]
+                preparation.completed.set()
+
+    def _run_live_window_preparation(self, target_date: date) -> None:
+        timeout_seconds = int(
+            os.environ.get("OCEANEMBED_LIVE_PREPARATION_TIMEOUT_SECONDS", "1800")
+        )
+        command = [
+            self._ingestion_python(),
+            str(INGESTION_SCRIPT),
+            "--prepare-window",
+            "--date",
+            target_date.isoformat(),
+        ]
+        logger.info(
+            "Resolving live observations for target %s using the ingestion pipeline",
+            target_date.isoformat(),
+        )
+        try:
+            result = subprocess.run(
+                command,
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning(
+                "Live-data preparation failed for %s: %s",
+                target_date.isoformat(),
+                exc,
+            )
+            return
+
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            logger.warning(
+                "Live-data preparation was incomplete for %s (exit %d): %s",
+                target_date.isoformat(),
+                result.returncode,
+                detail[-2000:],
+            )
+        elif result.stdout.strip():
+            logger.info("Live-data preparation: %s", result.stdout.strip()[-1000:])
 
     # ========================================================
     # PREDICTION
     # ========================================================
+
+    @staticmethod
+    def _coverage_for_window(
+        feature_arrays: dict[str, np.ndarray],
+        metadata: dict[str, int | float | str],
+        latitude: float,
+        longitude: float,
+        target_date: date,
+    ) -> SurfaceCoverageResponse:
+        output_row = int(metadata["output_row"])
+        output_col = int(metadata["output_col"])
+        input_row = output_row + 16
+        input_col = output_col + 16
+        ready_variables = [
+            feature
+            for feature in SURFACE_FEATURES
+            if feature in feature_arrays
+            and np.isfinite(feature_arrays[feature][-1, input_row, input_col])
+        ]
+        missing_variables = [
+            feature
+            for feature in SURFACE_FEATURES
+            if feature not in ready_variables
+        ]
+        ready = not missing_variables
+        window_start = date.fromisoformat(
+            str(metadata.get("window_start", target_date - timedelta(days=HISTORY_DAYS - 1)))
+        )
+        window_end = date.fromisoformat(
+            str(metadata.get("window_end", target_date))
+        )
+        return SurfaceCoverageResponse(
+            ready=ready,
+            latitude=latitude,
+            longitude=longitude,
+            snappedLatitude=float(metadata["snapped_latitude"]),
+            snappedLongitude=float(metadata["snapped_longitude"]),
+            date=target_date,
+            targetDate=target_date,
+            windowStart=window_start,
+            windowEnd=window_end,
+            availableDates=[
+                (window_start + timedelta(days=index)).isoformat()
+                for index in range((window_end - window_start).days + 1)
+            ],
+            missingDates=[],
+            requiredVariables=len(SURFACE_FEATURES),
+            variablesReady=len(ready_variables),
+            readyVariables=ready_variables,
+            missingVariables=missing_variables,
+            message=(
+                "All required surface observations are available"
+                if ready
+                else (
+                    f"Incomplete surface observations: "
+                    f"{len(ready_variables)}/{len(SURFACE_FEATURES)} variables available"
+                )
+            ),
+        )
+
+    def check_coverage(
+        self,
+        latitude: float,
+        longitude: float,
+        target_date: date,
+    ) -> SurfaceCoverageResponse:
+        if not self.loaded:
+            raise RuntimeError("Real OceanEmbed model/data are not loaded")
+        request = PredictionRequest(
+            latitude=latitude,
+            longitude=longitude,
+            date=target_date,
+        )
+        try:
+            feature_arrays, metadata = self._get_input_window(request)
+        except LiveWindowUnavailableError as exc:
+            start = target_date - timedelta(days=HISTORY_DAYS - 1)
+            missing_dates = exc.missing_dates
+            available_dates = [
+                day.isoformat()
+                for day in (
+                    start + timedelta(days=index)
+                    for index in range(HISTORY_DAYS)
+                )
+                if day.isoformat() not in missing_dates
+            ]
+            return SurfaceCoverageResponse(
+                ready=False,
+                latitude=latitude,
+                longitude=longitude,
+                snappedLatitude=None,
+                snappedLongitude=None,
+                date=target_date,
+                targetDate=target_date,
+                windowStart=start,
+                windowEnd=target_date,
+                availableDates=available_dates,
+                missingDates=missing_dates,
+                requiredVariables=len(SURFACE_FEATURES),
+                variablesReady=0,
+                readyVariables=[],
+                missingVariables=list(SURFACE_FEATURES),
+                message=(
+                    "Requested target-date input window is not available. "
+                    "Missing dates: " + ", ".join(missing_dates)
+                ),
+            )
+        return self._coverage_for_window(
+            feature_arrays,
+            metadata,
+            latitude,
+            longitude,
+            target_date,
+        )
 
     def predict(
         self,
@@ -390,6 +631,15 @@ class OceanEmbedModel:
                 request
             )
         )
+        coverage = self._coverage_for_window(
+            feature_arrays,
+            metadata,
+            request.latitude,
+            request.longitude,
+            request.date,
+        )
+        if not coverage.ready:
+            raise ValueError(coverage.message + ": " + ", ".join(coverage.missingVariables))
 
         # ----------------------------------------------------
         # 2. Validate feature ordering.

@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+
 @RestController
 @RequestMapping("/api/v1/predictions")
 public class PredictionController {
@@ -27,6 +29,15 @@ public class PredictionController {
     public ResponseEntity<PredictionResponseDTO> create(@Valid @RequestBody PredictionRequestDTO request) {
         PredictionResponseDTO response = predictionService.createPrediction(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/coverage")
+    public ResponseEntity<com.oceanembed.backend.dto.SurfaceCoverageDTO> coverage(
+            @RequestParam double latitude,
+            @RequestParam double longitude,
+            @RequestParam LocalDate date) {
+        return ResponseEntity.ok(
+                predictionService.getCoverage(latitude, longitude, date));
     }
 
     /** Retrieve a previously computed prediction job by id. */

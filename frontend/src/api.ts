@@ -29,6 +29,25 @@ export interface LiveStatus {
   ready: boolean;
 }
 
+export interface SurfaceCoverage {
+  ready: boolean;
+  latitude: number;
+  longitude: number;
+  snappedLatitude: number | null;
+  snappedLongitude: number | null;
+  date: string;
+  targetDate: string;
+  windowStart: string;
+  windowEnd: string;
+  availableDates: string[];
+  missingDates: string[];
+  requiredVariables: number;
+  variablesReady: number;
+  readyVariables: string[];
+  missingVariables: string[];
+  message: string;
+}
+
 export interface OceanEmbedResponse {
   jobId: number;
   status: string;
@@ -154,6 +173,124 @@ function readStringList(record: JsonRecord, ...names: string[]): string[] {
     return [];
   }
   return value.filter((item): item is string => typeof item === "string");
+}
+
+/**
+ * Application dates must be real calendar days in exact YYYY-MM-DD form
+ * with a non-zero-padded 4-digit year (rejects 0002-05-27, 0020-05-27, etc.).
+ */
+function isValidApplicationDate(value: string): boolean {
+  if (!/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day
+  );
+}
+
+function assertValidApplicationDate(value: string): void {
+  if (!isValidApplicationDate(value)) {
+    throw new Error(
+      `Invalid application date: "${value}". Expected a real calendar date in YYYY-MM-DD format with a 4-digit year.`,
+    );
+  }
+}
+
+function shiftIsoDate(isoDate: string, days: number): string {
+  assertValidApplicationDate(isoDate);
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days))
+    .toISOString()
+    .slice(0, 10);
+  assertValidApplicationDate(shifted);
+  return shifted;
+}
+
+function coverageRequestKey(
+  latitude: number,
+  longitude: number,
+  date: string,
+): string {
+  return `${latitude}|${longitude}|${date}`;
+}
+
+const inflightCoverageRequests = new Map<string, Promise<SurfaceCoverage>>();
+
+export async function fetchSurfaceCoverage(
+  request: Pick<OceanEmbedRequest, "latitude" | "longitude" | "date">,
+): Promise<SurfaceCoverage> {
+  assertValidApplicationDate(request.date);
+
+  const key = coverageRequestKey(
+    request.latitude,
+    request.longitude,
+    request.date,
+  );
+  const existing = inflightCoverageRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async (): Promise<SurfaceCoverage> => {
+    const query = new URLSearchParams({
+      latitude: String(request.latitude),
+      longitude: String(request.longitude),
+      date: request.date,
+    });
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/predictions/coverage?${query.toString()}`,
+    );
+    if (!response.ok) {
+      throw new OceanEmbedError("request-failed");
+    }
+
+    let responseBody: unknown;
+    try {
+      responseBody = await response.json();
+    } catch {
+      throw new OceanEmbedError("request-failed");
+    }
+    if (!isJsonRecord(responseBody)) {
+      throw new OceanEmbedError("request-failed");
+    }
+
+    const ready = readField(responseBody, "ready");
+    if (typeof ready !== "boolean") {
+      throw new OceanEmbedError("request-failed");
+    }
+    const date = nullableString(responseBody, "date") ?? request.date;
+    return {
+      ready,
+      latitude: requiredNumber(responseBody, "latitude"),
+      longitude: requiredNumber(responseBody, "longitude"),
+      snappedLatitude: nullableNumber(responseBody, "snappedLatitude", "snapped_latitude"),
+      snappedLongitude: nullableNumber(responseBody, "snappedLongitude", "snapped_longitude"),
+      date,
+      targetDate: nullableString(responseBody, "targetDate", "target_date") ?? date,
+      windowStart: nullableString(responseBody, "windowStart", "window_start")
+        ?? shiftIsoDate(date, -6),
+      windowEnd: nullableString(responseBody, "windowEnd", "window_end") ?? date,
+      availableDates: readStringList(responseBody, "availableDates", "available_dates"),
+      missingDates: readStringList(responseBody, "missingDates", "missing_dates"),
+      requiredVariables: requiredNumber(responseBody, "requiredVariables", "required_variables"),
+      variablesReady: requiredNumber(responseBody, "variablesReady", "variables_ready"),
+      readyVariables: readStringList(responseBody, "readyVariables", "ready_variables"),
+      missingVariables: readStringList(responseBody, "missingVariables", "missing_variables"),
+      message: requiredString(responseBody, "message"),
+    };
+  })().finally(() => {
+    inflightCoverageRequests.delete(key);
+  });
+
+  inflightCoverageRequests.set(key, promise);
+  return promise;
 }
 
 export async function fetchLiveStatus(): Promise<LiveStatus> {
@@ -294,6 +431,8 @@ function normalizeSurfaceObservation(value: unknown): SurfaceObservation {
 export async function reconstructOcean(
   request: OceanEmbedRequest
 ): Promise<OceanEmbedResponse> {
+  assertValidApplicationDate(request.date);
+
   const response = await fetch(
     `${API_BASE_URL}/api/v1/predictions`,
     {

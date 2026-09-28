@@ -20,6 +20,9 @@
       OCEANEMBED_MODEL_VERSION: oceanembed-v1.0
     volumes:
       - ./data/processed/ML:/workspace/data/processed/ML:ro
+      - ./data/processed/live:/workspace/data/processed/live
+      - ./data/raw/live:/workspace/data/raw/live
+      - copernicus-config:/root/.copernicusmarine
 
   backend-api:
     build: ./backend-api
@@ -32,9 +35,13 @@
       DB_USER: oceanembed
       DB_PASSWORD: oceanembed
       ML_SERVICE_BASE_URL: http://ml-service:8000
+      LIVE_STATUS_FILE: /workspace/data/processed/live/live_status.json
+    volumes:
+      - ./data/processed/live:/workspace/data/processed/live:ro
     depends_on:
       - postgres
       - ml-service
 
 volumes:
   pgdata:
+  copernicus-config:

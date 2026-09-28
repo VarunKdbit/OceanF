@@ -1,17 +1,22 @@
-﻿import logging
+import logging
+from datetime import date as date_type
 
 from fastapi import FastAPI, HTTPException
 
 from app.config import settings
-from app.model import model
+from app.model import SURFACE_FEATURES, model
 from app.schemas import (
     HealthResponse,
     PredictionRequest,
     PredictionResponse,
+    SurfaceCoverageResponse,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("oceanembed.api")
+
+# Historical coverage begins here; live dates may extend through today.
+SUPPORTED_APPLICATION_START = date_type(2025, 7, 1)
 
 app = FastAPI(
     title="OceanEmbed ML Service",
@@ -37,6 +42,78 @@ def health() -> HealthResponse:
 @app.get("/model/info", tags=["ops"])
 def model_info() -> dict:
     return model.get_model_info()
+
+
+@app.get(
+    "/coverage",
+    response_model=SurfaceCoverageResponse,
+    tags=["inference"],
+)
+def surface_coverage(
+    latitude: float,
+    longitude: float,
+    date: date_type,
+) -> SurfaceCoverageResponse:
+    logger.info(
+        "Coverage request received: latitude=%s longitude=%s date=%s",
+        latitude,
+        longitude,
+        date.isoformat(),
+    )
+
+    today = date_type.today()
+    if date < SUPPORTED_APPLICATION_START or date > today:
+        logger.info(
+            "Coverage request rejected by date validation: latitude=%s "
+            "longitude=%s date=%s (supported %s through %s)",
+            latitude,
+            longitude,
+            date.isoformat(),
+            SUPPORTED_APPLICATION_START.isoformat(),
+            today.isoformat(),
+        )
+        return SurfaceCoverageResponse(
+            ready=False,
+            latitude=latitude,
+            longitude=longitude,
+            snappedLatitude=None,
+            snappedLongitude=None,
+            date=date,
+            targetDate=date,
+            windowStart=date,
+            windowEnd=date,
+            availableDates=[],
+            missingDates=[date.isoformat()],
+            requiredVariables=len(SURFACE_FEATURES),
+            variablesReady=0,
+            readyVariables=[],
+            missingVariables=list(SURFACE_FEATURES),
+            message=(
+                f"Requested date {date.isoformat()} is outside the currently "
+                f"supported/available date range "
+                f"({SUPPORTED_APPLICATION_START.isoformat()} through "
+                f"{today.isoformat()})."
+            ),
+        )
+
+    if not model.loaded:
+        raise HTTPException(
+            status_code=503,
+            detail="Real OceanEmbed model/data are not loaded",
+        )
+    try:
+        logger.info(
+            "Coverage request passed validation; calling "
+            "model.check_coverage() for date=%s",
+            date.isoformat(),
+        )
+        return model.check_coverage(latitude, longitude, date)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        message = str(exc)
+        status_code = 422 if "Requested grid point could not be represented" in message else 500
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 @app.post(

@@ -71,3 +71,6 @@ frontend-temp/
 frontend/node_modules/
 frontend-temp/
 
+
+# Runtime cache lock
+data/processed/live/.daily-cache.lock
